@@ -389,6 +389,21 @@ function buildTerrain(mel,ppb,hU,loops,lead,tail){
   }
   return {Y,TAN,n,at,slope,low,ppb};
 }
+// 레이스 전용: 바퀴마다 한 곳(라운드 시작 기준 3번째 마디)에 실제 360도 루프를 끼워 넣는다.
+// 루프 바로 앞 블록 높이를 평평하게 고정해서 진입이 항상 안전하게 되도록 함 (그 자리의 멜로디 높낮이는 희생됨).
+// ponytail: 루프는 "레일에 올라탄" 단순 모델 — 속도 부족으로 떨어지는 실제 구심력 물리는 없음, 항상 완주됨
+function insertLoops(T,ppb){
+  const LOOP_R=70;
+  const loops=[];
+  for(let bar=3;LEAD+bar*4+1<T.n;bar+=8){
+    const k=LEAD+bar*4;
+    const baseY=T.Y[k-1];
+    if(baseY===null) continue;
+    T.Y[k]=baseY;
+    loops.push({x:(k+0.1)*ppb, r:LOOP_R, baseY});
+  }
+  T.loops=loops;
+}
 
 // ---------- compose screen ----------
 const grid=$('grid'); const cells=[];
@@ -514,12 +529,13 @@ function startRace(){
   const vx=230*Math.min(1.5,Math.max(1,1+(bpm-80)/160));
   const ppb=vx*spb;
   const T=buildTerrain(song.mel,ppb,22,LOOPS,LEAD,5);
+  insertLoops(T,ppb);
   const coins=[];
   for(let b=LEAD;b<LEAD+MEL_BEATS*LOOPS;b++){ const p=song.mel[(b-LEAD)%16]; if(p>=0){ const x=(b+0.3)*ppb; const gy=T.at(x); if(gy!==null) coins.push({x,y:gy-30,got:false}); } }
   R={bpm,spb,vx,ppb,T,mel:song.mel.slice(),drum:song.drum,
      g:0.72*vx*vx/ppb, gG:15*vx*vx/ppb, cfg:DIFFS[song.diff||0], torque:DIFFS[song.diff||0].torque*(0.8+bpm/400), tgt:0,
      accel:vx/0.6, coastDecel:vx/1, brakeDecel:vx/0.3, revVx:vx*0.6,
-     simT:null,x:0,y:T.at(0),vy:0,spd:0,ang:0,angV:0,onGround:true,air:0,
+     simT:null,x:0,y:T.at(0),vy:0,spd:0,ang:0,angV:0,onGround:true,air:0,airSpin:0,inLoop:null,
      dead:false,lives:3,respawnX:0,deadX:0,deadY:0,deadVy:0,deadAng:0,deadAngV:0,deadT:0,
      muted:new Set(),played:new Set(),stepIdx:0,totalNotes:song.mel.filter(v=>v>=0).length*2,
      coins,score:0,combo:0,maxCombo:0,perfect:0,good:0,crashes:0,pops:[],parts:[],puff:0,wheel:0,
@@ -566,6 +582,17 @@ function stepPhys(dt){
     triggerSteps();
     return;
   }
+  if(R.inLoop){
+    const lp=R.inLoop, sp=Math.max(80,R.spd);
+    lp.phi+=(sp/lp.r)*dt;
+    if(lp.phi>=2*Math.PI){
+      R.x=lp.x; R.y=lp.baseY; R.ang=0; R.vy=0; R.onGround=true; R.air=0; R.angV=0; R.inLoop=null;
+      triggerSteps(); return;
+    }
+    R.x=lp.x+lp.r*Math.sin(lp.phi); R.y=lp.baseY-lp.r+lp.r*Math.cos(lp.phi); R.ang=wrap(-lp.phi); R.wheel+=sp*dt;
+    triggerSteps();
+    return;
+  }
   const inp=(R.brake?1:0)-(R.gas?1:0);
   if(R.onGround){
     // 가속=지상에서 전진(바퀴 돌수록 목표 속도 lapMult배), 브레이크=후진(먼저 멈췄다가 반대로), 안 누르면 서서히 정지
@@ -578,12 +605,14 @@ function stepPhys(dt){
     if(gx!==null){ const pred=R.y+R.vy*dt+0.5*R.gG*dt*dt; if(gx<=pred+0.5) stay=true; }
     if(stay){ const sl=T.slope(R.x); R.vy=sl*R.spd; R.y=gx; R.ang+=(Math.atan(sl)-R.ang)*Math.min(1,22*dt); R.angV=0; R.wheel+=R.spd*dt;
       R.puff-=dt; if(R.puff<=0&&R.spd>4){R.puff=0.11; const ca=Math.cos(R.ang),sa=Math.sin(R.ang); R.parts.push({x:R.x-34*ca+8*sa,y:R.y-34*sa-8*ca-4,vx:-40,vy:-20,life:0.6,max:0.6,r:3,c:'rgba(169,173,214,'});}
+      const lp=T.loops&&T.loops.find(l=>px<l.x&&R.x>=l.x&&R.spd>0);
+      if(lp){ R.inLoop={x:lp.x,r:lp.r,baseY:lp.baseY,phi:0}; }
       triggerSteps(); return; }
-    R.onGround=false; R.air=0; R.angV=0; R.jg=0;
+    R.onGround=false; R.air=0; R.angV=0; R.jg=0; R.airSpin=0;
     if(gx===null) aimJump(R.x);
     const L=predictLanding(); R.tgt=L?Math.atan(T.slope(L.x)):0;
   }
-  R.air+=dt; R.vy+=(R.jg||R.g)*dt; R.y+=R.vy*dt;
+  R.air+=dt; R.vy+=(R.jg||R.g)*dt; R.y+=R.vy*dt; R.airSpin+=R.angV*dt;
   if(inp===0&&R.cfg.assist>0) R.angV+=(R.cfg.assist/lapMult())*wrap(R.tgt-R.ang)*dt;
   // a held pedal turns the car at a steady speed (no build-up), so letting go stops the spin quickly
   if(inp!==0) R.angV+=(inp*R.torque-R.angV)*Math.min(1,12*dt); else R.angV*=Math.max(0,1-R.cfg.damp*dt); R.angV=Math.max(-6,Math.min(6,R.angV)); R.ang=wrap(R.ang+R.angV*dt);
@@ -595,10 +624,15 @@ function stepPhys(dt){
 // leaving a ramp lip: pick the vertical speed (and, for big climbs, a stronger gravity)
 // so the car clears the far edge and lands 35% into the next solid block. 현재 속도(spd) 기준으로 조준하므로
 // 천천히 달리다 뛰면 그만큼 짧게 날아간다(느리게 달리면 점프가 약해지는 게 자연스러움)
+// 바퀴마다 라운드 시작 기준 1번째 마디는 "트릭 구간" - 쉼표로 점프대가 생기면 더 멀리/높이 띄워서
+// 공중에서 360도 돌 틈을 만든다 (멜로디에 쉼표가 없으면 그냥 지나감 - 지형은 여전히 멜로디가 결정)
+function isTrickSpot(x){ const bar=Math.floor((x/R.ppb-LEAD)/4); return ((bar%8)+8)%8===1; }
 function aimJump(x){
-  const T=R.T, ppb=R.ppb, sp=Math.max(40,R.spd); let k2=Math.floor(x/ppb); while(k2<=T.n&&T.Y[k2]===null) k2++;
+  const T=R.T, ppb=R.ppb, sp=Math.max(40,R.spd), trick=isTrickSpot(x);
+  let k2=Math.floor(x/ppb); while(k2<=T.n&&T.Y[k2]===null) k2++;
   if(k2>T.n) return;
-  const Y2=T.Y[k2], M=22, tl=((k2+0.35)*ppb-x)/sp, te=Math.max(0.01,(k2*ppb-x)/sp);
+  if(trick&&T.Y[k2+1]!==null) k2++;
+  const Y2=T.Y[k2], M=trick?40:22, tl=((k2+0.35)*ppb-x)/sp, te=Math.max(0.01,(k2*ppb-x)/sp);
   const A=Y2-M-R.y, B=Y2-R.y;
   const gs=2*(M*te-A*(tl-te))/(te*tl*(tl-te));
   const gj=Math.min(8*R.g,Math.max(R.g,gs));
@@ -606,10 +640,12 @@ function aimJump(x){
 }
 function land(gx){
   const sl=R.T.slope(R.x), sa=Math.atan(sl), deg=Math.abs(wrap(R.ang-sa))*180/Math.PI;
-  const air=R.air;
-  R.y=gx; R.vy=sl*R.spd; R.onGround=true; R.air=0; R.angV=0; R.jg=0;
+  const air=R.air, spin=R.airSpin||0;
+  R.y=gx; R.vy=sl*R.spd; R.onGround=true; R.air=0; R.angV=0; R.jg=0; R.airSpin=0;
   if(deg>R.cfg.flip/lapMult()){crash('뒤집혔어요');return;}
   if(air<0.22) return;
+  const spins=Math.floor(Math.abs(spin)/(2*Math.PI));
+  if(spins>=1){ R.combo++; R.score+=spins*500; pop(spins*360+'° 성공!','#5EC8FF',true); sparks('#5EC8FF'); }
   if(deg<=R.cfg.pf){R.perfect++;R.combo++;R.score+=300;pop('Perfect!','#FFC93C',true);sparks('#FFC93C');}
   else if(deg<=R.cfg.gd){R.good++;R.combo++;R.score+=150;pop('Good','#5EC8FF');}
   else {R.combo=0;pop('아슬아슬','#A9ADD6');}
@@ -702,6 +738,16 @@ function render(){
     c.strokeStyle='rgba(255,201,60,0.15)'; c.lineWidth=16; c.beginPath(); sg.forEach((p,i)=>i?c.lineTo(p[0],p[1]):c.moveTo(p[0],p[1])); c.stroke();
     c.strokeStyle='#FFC93C'; c.lineWidth=5; c.stroke();
     c.save(); c.setLineDash([10,8]); c.strokeStyle='#353A72'; c.lineWidth=2; c.beginPath(); sg.forEach((p,i)=>i?c.lineTo(p[0],p[1]+16):c.moveTo(p[0],p[1]+16)); c.stroke(); c.restore();
+  });
+  // 루프 (ponytail: 차보다 항상 위 레이어로 그림 - 차가 루프 뒤쪽을 지날 때 가려지는 건 생략)
+  if(T.loops) T.loops.forEach(lp=>{
+    const sx=lp.x-camX; if(sx<-120||sx>W+120) return;
+    const sy=lp.baseY-camY-lp.r;
+    c.save(); c.lineJoin='round'; c.lineCap='round';
+    c.strokeStyle='rgba(255,201,60,0.15)'; c.lineWidth=16; c.beginPath(); c.arc(sx,sy,lp.r,0,Math.PI*2); c.stroke();
+    c.strokeStyle='#FFC93C'; c.lineWidth=5; c.beginPath(); c.arc(sx,sy,lp.r,0,Math.PI*2); c.stroke();
+    c.setLineDash([10,8]); c.strokeStyle='#353A72'; c.lineWidth=2; c.beginPath(); c.arc(sx,sy,lp.r-16,0,Math.PI*2); c.stroke();
+    c.restore();
   });
   // bar gates - 끝없이 이어지므로 화면에 보이는 구간만, 바퀴가 넘어가는 자리는 금색 "바퀴 N" 표지
   const beatNow=R.x/R.ppb, curBar=Math.floor((beatNow-LEAD)/4);

@@ -49,12 +49,13 @@ function newRace(mel, bpm, diffIdx) {
   const vx = 230 * Math.min(1.5, Math.max(1, 1 + (bpm - 80) / 160));
   const ppb = vx * spb;
   const T = buildTerrain(mel, ppb, 22, LOOPS, LEAD, 5);
+  insertLoops(T, ppb);
   const cfg = DIFFS[diffIdx];
   return {
     bpm, spb, vx, ppb, T, mel: mel.slice(),
     g: 0.72 * vx * vx / ppb, gG: 15 * vx * vx / ppb, cfg, torque: cfg.torque * (0.8 + bpm / 400), tgt: 0,
     accel: vx / 0.6, coastDecel: vx / 1, brakeDecel: vx / 0.3, revVx: vx * 0.6,
-    simT: 0, x: 0, y: T.at(0), vy: 0, spd: 0, ang: 0, angV: 0, onGround: true, air: 0,
+    simT: 0, x: 0, y: T.at(0), vy: 0, spd: 0, ang: 0, angV: 0, onGround: true, air: 0, airSpin: 0, inLoop: null,
     dead: false, lives: 3, respawnX: 0, deadX: 0, deadY: 0, deadVy: 0, deadAng: 0, deadAngV: 0, deadT: 0,
     muted: new Set(), played: new Set(), stepIdx: 0,
     score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, crashes: 0, pops: [], parts: [], puff: 0, wheel: 0,
