@@ -191,7 +191,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
     </div>
     <div id="cue" class="hud"></div>
     <div id="racehint" class="hud">가속을 눌러야 출발해요 · 공중에서 누르는 동안 차가 돌아가요 · 점선 차와 각도가 같아지면(노란색) 손을 떼세요</div>
-    <button id="brake" class="pedal" aria-label="브레이크, 땅에서는 빨리 멈춤, 공중에서는 앞으로 기울기">
+    <button id="brake" class="pedal" aria-label="브레이크, 땅에서는 후진, 공중에서는 앞으로 기울기">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--coral)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>브레이크</button>
     <button id="gas" class="pedal" aria-label="가속, 땅에서는 전진, 공중에서는 뒤로 기울기">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"></path><path d="M21 4v5h-5"></path></svg>가속</button>
@@ -494,7 +494,7 @@ function startRace(){
   for(let b=LEAD;b<LEAD+MEL_BEATS;b++){ const p=song.mel[(b-LEAD)%16]; if(p>=0){ const x=(b+0.3)*ppb; const gy=T.at(x); if(gy!==null) coins.push({x,y:gy-30,got:false}); } }
   R={bpm,spb,vx,ppb,T,mel:song.mel.slice(),drum:song.drum,
      g:0.72*vx*vx/ppb, gG:15*vx*vx/ppb, cfg:DIFFS[song.diff||0], torque:DIFFS[song.diff||0].torque*(0.8+bpm/400), tgt:0,
-     accel:vx/0.6, coastDecel:vx/1, brakeDecel:vx/0.3,
+     accel:vx/0.6, coastDecel:vx/1, brakeDecel:vx/0.3, revVx:vx*0.6,
      simT:null,x:0,y:T.at(0),vy:0,spd:0,ang:0,angV:0,onGround:true,air:0,
      dead:false,respawnX:0,deadX:0,deadY:0,deadVy:0,deadAng:0,deadAngV:0,deadT:0,
      muted:new Set(),played:new Set(),stepIdx:0,totalNotes:song.mel.filter(v=>v>=0).length*2,
@@ -539,11 +539,11 @@ function stepPhys(dt){
   }
   const inp=(R.brake?1:0)-(R.gas?1:0);
   if(R.onGround){
-    // 가속=지상에서 전진(목표 속도까지 가속), 안 누르면 서서히/브레이크면 빠르게 멈춤
-    if(R.gas) R.spd=Math.min(R.vx,R.spd+R.accel*dt);
-    else R.spd=Math.max(0,R.spd-(R.brake?R.brakeDecel:R.coastDecel)*dt);
+    // 가속=지상에서 전진, 브레이크=후진(먼저 멈췄다가 반대로), 안 누르면 서서히 정지
+    const tgtSpd=R.gas?R.vx:(R.brake?-R.revVx:0), rate=R.gas?R.accel:(R.brake?R.brakeDecel:R.coastDecel);
+    R.spd=R.spd<tgtSpd?Math.min(tgtSpd,R.spd+rate*dt):Math.max(tgtSpd,R.spd-rate*dt);
   }
-  R.x+=R.spd*dt;
+  R.x=Math.max(0,R.x+R.spd*dt); if(R.x===0&&R.spd<0) R.spd=0; // 출발선 너머로는 후진 못 함
   if(R.onGround){
     const gx=T.at(R.x); let stay=false;
     if(gx!==null){ const pred=R.y+R.vy*dt+0.5*R.gG*dt*dt; if(gx<=pred+0.5) stay=true; }
