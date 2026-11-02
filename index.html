@@ -85,6 +85,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 .segs i.done{background:var(--gold);} .segs i.mute{background:var(--coral);} .segs i.now{background:var(--sky);}
 #hudR{right:16px;top:10px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-variant-numeric:tabular-nums;}
 #score{font-family:var(--display);font-size:30px;line-height:1;}
+#lives{font-size:15px;letter-spacing:2px;color:var(--coral);}
 .pedal{position:absolute;bottom:18px;width:96px;height:96px;border-radius:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:13px;font-weight:700;padding:0;touch-action:none;}
 #brake{left:20px;border:2px solid var(--coral);background:var(--ink);color:var(--text);}
 #gas{right:20px;border:none;background:var(--gold);color:var(--on-gold);}
@@ -134,6 +135,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
       <input id="songname" maxlength="16" value="내 곡 1">
       <span class="grow"></span>
       <div class="pills" id="diffs" role="group" aria-label="난이도" style="width:210px;"></div>
+      <button id="presetbtn" class="btn" style="height:36px;padding:0 12px;">기본 곡</button>
       <button id="codebtn" class="btn" style="height:36px;padding:0 12px;">코드로 불러오기</button>
     </div>
     <div class="cbody">
@@ -165,6 +167,14 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
         </div>
       </div>
     </div>
+    <div id="presetsheet" class="sheet" hidden>
+      <div class="card">
+        <h2>기본 곡</h2>
+        <span class="hint">바로 달려볼 수 있는 기본 멜로디예요. 골라서 고쳐 써도 돼요.</span>
+        <div class="row" id="presetlist" style="justify-content:stretch;flex-direction:column;gap:8px;"></div>
+        <div class="row"><button id="presetcancel" class="btn">닫기</button></div>
+      </div>
+    </div>
     <div id="codesheet" class="sheet" hidden>
       <div class="card">
         <h2>코드로 불러오기</h2>
@@ -186,6 +196,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
       </div>
     </div>
     <div id="hudR" class="hud">
+      <span id="lives" aria-label="남은 목숨">♥♥♥</span>
       <span id="score">0</span>
       <div style="display:flex;gap:12px;font-size:12px;"><span><span class="hint">콤보 </span><b id="combo" style="color:var(--gold)">0</b></span><span><span class="hint">완성도 </span><b id="comp2" style="color:var(--sky)">100%</b></span></div>
     </div>
@@ -210,7 +221,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
       <div style="display:flex;align-items:center;gap:16px;">
         <div class="stars" id="stars"></div>
         <div style="display:flex;flex-direction:column;">
-          <h2 class="rtitle">완주!</h2>
+          <h2 class="rtitle" id="rtitle">게임 오버!</h2>
           <span id="starhint" class="hint">별 2개 · 노 미스면 3개</span>
         </div>
       </div>
@@ -262,13 +273,18 @@ const DRUMS=[
   {name:'신남',k:[1,0,0,1,1,0,1,0],s:[0,0,1,0,0,0,1,1],h:[1,1,1,1,1,1,1,1]},
   {name:'느긋',k:[1,0,0,0,0,0,0,0],s:[0,0,0,0,1,0,0,0],h:[1,0,1,0,1,0,1,0]}
 ];
+const PRESETS=[
+  {name:'계단',mel:[0,1,2,3,4,5,4,3,2,1,0,1,2,3,4,-1]},
+  {name:'통통',mel:[0,4,-1,2,6,-1,1,5,-1,3,7,-1,2,6,8,-1]},
+  {name:'구불구불',mel:[2,4,6,4,2,0,2,4,6,8,6,4,2,0,2,-1]}
+];
 // difficulty: kick = nose-up spin off a ramp, assist = how hard the car levels itself when no pedal is held, flip = crash angle
 const DIFFS=[
   {name:'쉬움',kick:-0.5,assist:4,damp:6,torque:1.7,flip:65,pf:16,gd:32},
   {name:'보통',kick:-0.8,assist:1.5,damp:5,torque:2.2,flip:52,pf:13,gd:28},
   {name:'어려움',kick:-1.1,assist:0,damp:3,torque:2.8,flip:42,pf:11,gd:24}
 ];
-const LEAD=2, MEL_BEATS=32, END_BEAT=LEAD+MEL_BEATS+2;
+const LEAD=2, MEL_BEATS=32, END_BEAT=LEAD+MEL_BEATS+2, LOOPS=200; // LOOPS: 내 곡을 몇 바퀴까지 반복해서 깔아둘지 (바퀴마다 더 빨라지고 어려워짐, 목숨 다할 때까지)
 const $=id=>document.getElementById(id);
 let song={name:'내 곡 1',mel:[0,2,3,3,4,5,5,-1,7,6,5,3,4,2,0,-1],bpm:120,drum:0,diff:0};
 try{const s=JSON.parse(localStorage.getItem('mr-song')||'null'); if(s&&Array.isArray(s.mel)&&s.mel.length===16){song=Object.assign(song,s);}}catch(e){}
@@ -466,6 +482,14 @@ function decode(str){
   let name='친구의 곡'; try{ if(p[4]) name=decodeURIComponent(escape(atob(p.slice(4).join('-')))); }catch(e){}
   return {mel:p[1].split('').map(ch=>ch==='x'?-1:+ch),bpm:Math.round(bpm/5)*5,drum:Math.floor(drum),name:name.slice(0,16)};
 }
+const presetlistEl=$('presetlist');
+PRESETS.forEach(p=>{
+  const b=document.createElement('button'); b.className='btn'; b.style.height='42px'; b.textContent=p.name;
+  b.addEventListener('click',()=>{ song.mel=p.mel.slice(); save(); syncCompose(); $('presetsheet').hidden=true; toast('"'+p.name+'" 곡을 불러왔어요'); });
+  presetlistEl.appendChild(b);
+});
+$('presetbtn').onclick=()=>{$('presetsheet').hidden=false;};
+$('presetcancel').onclick=()=>{$('presetsheet').hidden=true;};
 $('codebtn').onclick=()=>{$('codesheet').hidden=false;$('codein').value='';$('codein').focus();};
 $('codecancel').onclick=()=>{$('codesheet').hidden=true;};
 $('codeok').onclick=()=>{
@@ -489,14 +513,14 @@ function startRace(){
   const bpm=song.bpm, spb=60/bpm;
   const vx=230*Math.min(1.5,Math.max(1,1+(bpm-80)/160));
   const ppb=vx*spb;
-  const T=buildTerrain(song.mel,ppb,22,2,LEAD,END_BEAT-LEAD-MEL_BEATS+3);
+  const T=buildTerrain(song.mel,ppb,22,LOOPS,LEAD,5);
   const coins=[];
-  for(let b=LEAD;b<LEAD+MEL_BEATS;b++){ const p=song.mel[(b-LEAD)%16]; if(p>=0){ const x=(b+0.3)*ppb; const gy=T.at(x); if(gy!==null) coins.push({x,y:gy-30,got:false}); } }
+  for(let b=LEAD;b<LEAD+MEL_BEATS*LOOPS;b++){ const p=song.mel[(b-LEAD)%16]; if(p>=0){ const x=(b+0.3)*ppb; const gy=T.at(x); if(gy!==null) coins.push({x,y:gy-30,got:false}); } }
   R={bpm,spb,vx,ppb,T,mel:song.mel.slice(),drum:song.drum,
      g:0.72*vx*vx/ppb, gG:15*vx*vx/ppb, cfg:DIFFS[song.diff||0], torque:DIFFS[song.diff||0].torque*(0.8+bpm/400), tgt:0,
      accel:vx/0.6, coastDecel:vx/1, brakeDecel:vx/0.3, revVx:vx*0.6,
      simT:null,x:0,y:T.at(0),vy:0,spd:0,ang:0,angV:0,onGround:true,air:0,
-     dead:false,respawnX:0,deadX:0,deadY:0,deadVy:0,deadAng:0,deadAngV:0,deadT:0,
+     dead:false,lives:3,respawnX:0,deadX:0,deadY:0,deadVy:0,deadAng:0,deadAngV:0,deadT:0,
      muted:new Set(),played:new Set(),stepIdx:0,totalNotes:song.mel.filter(v=>v>=0).length*2,
      coins,score:0,combo:0,maxCombo:0,perfect:0,good:0,crashes:0,pops:[],parts:[],puff:0,wheel:0,
      camY:null,camY0:null,gas:false,brake:false,paused:false,finished:false,lastHud:''};
@@ -509,19 +533,24 @@ function doStep(st){
   if(!R) return;
   const t=AC.currentTime, beat=st>>1, sub=st&1;
   if(beat<LEAD){ if(sub===0){ hat(t,0.3); if(beat===0) kick(t,0.4);} return; }
-  const mb=beat-LEAD;
-  if(mb<MEL_BEATS){
-    const ps=(st-LEAD*2)%8, D=DRUMS[R.drum];
-    if(D.k[ps]) kick(t); if(D.s[ps]) snare(t); if(D.h[ps]) hat(t);
-    if(sub===0){ const p=R.mel[mb%16], bar=Math.floor(mb/4);
-      if(p>=0&&!R.muted.has(bar)){ playNote(t,p,R.spb*0.9); R.played.add(beat); } }
-  } else if(mb===MEL_BEATS&&sub===0){ kick(t,1); cymbal(t); }
+  const lapBeat=beat-LEAD, lapIdx=Math.floor(lapBeat/MEL_BEATS), mb=lapBeat%MEL_BEATS;
+  const ps=(st-LEAD*2)%8, D=DRUMS[R.drum];
+  if(D.k[ps]) kick(t); if(D.s[ps]) snare(t); if(D.h[ps]) hat(t);
+  if(sub===0){ const p=R.mel[mb%16], bar=Math.floor(mb/4);
+    // 내 곡(1바퀴째)에서 뒤집혀 소거된 마디는 그 바퀴만 조용함 - 다음 바퀴부턴 다시 다 들림
+    if(p>=0&&(lapIdx>0||!R.muted.has(bar))){ playNote(t,p,R.spb*0.9); R.played.add(beat); } }
+  if(mb===0&&sub===0&&lapBeat>0){ kick(t,1); cymbal(t); } // 바퀴 넘어갈 때 플로리시
 }
 function triggerSteps(){
   const target=Math.floor(R.x/(R.ppb/2));
   while(R.stepIdx<=target){ doStep(R.stepIdx); R.stepIdx++; }
 }
 const wrap=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a;};
+// 바퀴(내 곡 한 번 재생 분량=8마디)를 돌 때마다 조금씩 더 빠르고 더 깐깐해짐. +60%에서 상한
+function lapMult(){
+  const bar=Math.floor((R.x/R.ppb-LEAD)/4), lap=Math.max(0,Math.floor(bar/8));
+  return 1+Math.min(0.6,0.08*lap);
+}
 
 function physics(now){
   if(R.simT===null){R.simT=now;return;}
@@ -539,8 +568,8 @@ function stepPhys(dt){
   }
   const inp=(R.brake?1:0)-(R.gas?1:0);
   if(R.onGround){
-    // 가속=지상에서 전진, 브레이크=후진(먼저 멈췄다가 반대로), 안 누르면 서서히 정지
-    const tgtSpd=R.gas?R.vx:(R.brake?-R.revVx:0), rate=R.gas?R.accel:(R.brake?R.brakeDecel:R.coastDecel);
+    // 가속=지상에서 전진(바퀴 돌수록 목표 속도 lapMult배), 브레이크=후진(먼저 멈췄다가 반대로), 안 누르면 서서히 정지
+    const tgtSpd=R.gas?R.vx*lapMult():(R.brake?-R.revVx:0), rate=R.gas?R.accel:(R.brake?R.brakeDecel:R.coastDecel);
     R.spd=R.spd<tgtSpd?Math.min(tgtSpd,R.spd+rate*dt):Math.max(tgtSpd,R.spd-rate*dt);
   }
   R.x=Math.max(0,R.x+R.spd*dt); if(R.x===0&&R.spd<0) R.spd=0; // 출발선 너머로는 후진 못 함
@@ -555,7 +584,7 @@ function stepPhys(dt){
     const L=predictLanding(); R.tgt=L?Math.atan(T.slope(L.x)):0;
   }
   R.air+=dt; R.vy+=(R.jg||R.g)*dt; R.y+=R.vy*dt;
-  if(inp===0&&R.cfg.assist>0) R.angV+=R.cfg.assist*wrap(R.tgt-R.ang)*dt;
+  if(inp===0&&R.cfg.assist>0) R.angV+=(R.cfg.assist/lapMult())*wrap(R.tgt-R.ang)*dt;
   // a held pedal turns the car at a steady speed (no build-up), so letting go stops the spin quickly
   if(inp!==0) R.angV+=(inp*R.torque-R.angV)*Math.min(1,12*dt); else R.angV*=Math.max(0,1-R.cfg.damp*dt); R.angV=Math.max(-6,Math.min(6,R.angV)); R.ang=wrap(R.ang+R.angV*dt);
   triggerSteps();
@@ -579,7 +608,7 @@ function land(gx){
   const sl=R.T.slope(R.x), sa=Math.atan(sl), deg=Math.abs(wrap(R.ang-sa))*180/Math.PI;
   const air=R.air;
   R.y=gx; R.vy=sl*R.spd; R.onGround=true; R.air=0; R.angV=0; R.jg=0;
-  if(deg>R.cfg.flip){crash('뒤집혔어요');return;}
+  if(deg>R.cfg.flip/lapMult()){crash('뒤집혔어요');return;}
   if(air<0.22) return;
   if(deg<=R.cfg.pf){R.perfect++;R.combo++;R.score+=300;pop('Perfect!','#FFC93C',true);sparks('#FFC93C');}
   else if(deg<=R.cfg.gd){R.good++;R.combo++;R.score+=150;pop('Good','#5EC8FF');}
@@ -587,17 +616,18 @@ function land(gx){
   R.maxCombo=Math.max(R.maxCombo,R.combo);
 }
 function crash(msg){
-  R.dead=true; R.crashes++; R.combo=0;
+  R.dead=true; R.crashes++; R.combo=0; R.lives--;
   R.deadX=R.x; R.deadY=R.y; R.deadVy=-R.g*0.5; R.deadAng=R.ang; R.deadAngV=(Math.random()<0.5?-1:1)*7; R.deadT=0;
-  const beat=R.x/R.ppb, bar=Math.floor((beat-LEAD)/4);
-  let rb;
-  if(bar>=0&&bar<8){ R.muted.add(bar); rb=LEAD+4*(bar+1); }
-  else rb=Math.ceil(beat)+1;
-  rb=Math.min(rb,END_BEAT-1);
-  let k=rb; while(k<R.T.n&&R.T.Y[k]===null) k++;
-  R.respawnX=(k+0.05)*R.ppb;
   pop(msg,'#FF7A6B',true);
   sparks('#FF7A6B');
+  if(R.lives<=0){ R.finished=true; setTimeout(finishRace,900); return; } // 목숨 다 씀 - 죽는 모션 잠깐 보여주고 결과 화면
+  const beat=R.x/R.ppb, lapBeat=beat-LEAD, lapIdx=Math.floor(lapBeat/MEL_BEATS), bar=Math.floor((lapBeat%MEL_BEATS)/4);
+  let rb;
+  if(lapIdx===0&&bar>=0&&bar<8){ R.muted.add(bar); rb=LEAD+4*(bar+1); }
+  else rb=Math.ceil(beat)+1;
+  rb=Math.min(rb,R.T.n-1);
+  let k=rb; while(k<R.T.n&&R.T.Y[k]===null) k++;
+  R.respawnX=(k+0.05)*R.ppb;
 }
 function pop(text,color,big){ R.pops.push({text,color,big:!!big,x:R.x,y:R.y-60,t:0}); }
 function sparks(color){ for(let i=0;i<12;i++){const a=Math.random()*Math.PI*2,s=60+Math.random()*140; R.parts.push({x:R.x,y:R.y-10,vx:Math.cos(a)*s,vy:Math.sin(a)*s-60,life:0.5,max:0.5,r:2.2,c:color==='#FFC93C'?'rgba(255,201,60,':'rgba(255,122,107,',g:true});} }
@@ -673,17 +703,17 @@ function render(){
     c.strokeStyle='#FFC93C'; c.lineWidth=5; c.stroke();
     c.save(); c.setLineDash([10,8]); c.strokeStyle='#353A72'; c.lineWidth=2; c.beginPath(); sg.forEach((p,i)=>i?c.lineTo(p[0],p[1]+16):c.moveTo(p[0],p[1]+16)); c.stroke(); c.restore();
   });
-  // bar gates
+  // bar gates - 끝없이 이어지므로 화면에 보이는 구간만, 바퀴가 넘어가는 자리는 금색 "바퀴 N" 표지
   const beatNow=R.x/R.ppb, curBar=Math.floor((beatNow-LEAD)/4);
-  for(let j=0;j<=8;j++){
+  for(let j=Math.max(0,curBar-1);j<=curBar+9;j++){
     const bx=(LEAD+4*j)*R.ppb-camX; if(bx<-40||bx>W+40) continue;
     let gy=T.at((LEAD+4*j)*R.ppb+2); if(gy===null) gy=T.at((LEAD+4*j)*R.ppb+R.ppb)??R.y; const sy=gy-camY;
-    const fin=j===8;
-    c.save(); c.setLineDash([4,6]); c.strokeStyle=fin?'rgba(255,201,60,0.7)':'rgba(94,200,255,0.55)'; c.lineWidth=2; c.beginPath(); c.moveTo(bx,sy); c.lineTo(bx,sy-112); c.stroke(); c.restore();
-    const label=fin?'도착':String(j+1), w=fin?40:24;
-    c.fillStyle=fin?'#FFC93C':(R.muted.has(j)?'#FF7A6B':(j===curBar?'#5EC8FF':'#2B2F5E'));
+    const barInLap=((j%8)+8)%8, lapIdx=Math.floor(j/8), lapStart=(j>0&&barInLap===0), mutedHere=lapIdx===0&&R.muted.has(barInLap);
+    c.save(); c.setLineDash([4,6]); c.strokeStyle=lapStart?'rgba(255,201,60,0.7)':'rgba(94,200,255,0.55)'; c.lineWidth=2; c.beginPath(); c.moveTo(bx,sy); c.lineTo(bx,sy-112); c.stroke(); c.restore();
+    const label=lapStart?('바퀴 '+(lapIdx+1)):String(barInLap+1), w=lapStart?48:24;
+    c.fillStyle=lapStart?'#FFC93C':(mutedHere?'#FF7A6B':(j===curBar?'#5EC8FF':'#2B2F5E'));
     rr(c,bx-w/2,sy-130,w,18,9); c.fill();
-    c.fillStyle=(fin||j===curBar||R.muted.has(j))?'#15172E':'#A9ADD6'; c.font='700 11px "Noto Sans KR", sans-serif'; c.textAlign='center'; c.fillText(label,bx,sy-117);
+    c.fillStyle=(lapStart||j===curBar||mutedHere)?'#15172E':'#A9ADD6'; c.font='700 11px "Noto Sans KR", sans-serif'; c.textAlign='center'; c.fillText(label,bx,sy-117);
   }
   // coins
   R.coins.forEach(k=>{ if(k.got) return; const sx=k.x-camX; if(sx<-30||sx>W+30) return; noteCoin(c,sx,k.y-camY); });
@@ -705,18 +735,19 @@ function render(){
 function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
 
 function updateHud(){
-  const beat=R.x/R.ppb, bar=Math.floor((beat-LEAD)/4);
+  const beat=R.x/R.ppb, bar=Math.floor((beat-LEAD)/4), lap=Math.max(0,Math.floor(bar/8)), barInLap=((bar%8)+8)%8;
   const segs=$('segs').children;
-  for(let j=0;j<8;j++){ const cls=R.muted.has(j)?'mute':(j<bar?'done':(j===bar?'now':'')); if(segs[j].className!==cls) segs[j].className=cls; }
-  $('hudbar').textContent='마디 '+Math.max(1,Math.min(8,bar+1))+' / 8';
+  for(let j=0;j<8;j++){ const cls=(lap===0&&R.muted.has(j))?'mute':(j<barInLap?'done':(j===barInLap?'now':'')); if(segs[j].className!==cls) segs[j].className=cls; }
+  $('hudbar').textContent=(lap>0?'바퀴 '+(lap+1)+' · ':'')+'마디 '+(barInLap+1)+' / 8';
   $('score').textContent=R.score.toLocaleString('ko-KR');
   $('combo').textContent=R.combo;
   const heard=countHeard(beat);
   $('comp2').textContent=heard+'%';
+  $('lives').textContent='♥'.repeat(Math.max(0,R.lives))+'♡'.repeat(Math.max(0,3-R.lives));
   const cue=$('cue');
   let txt='', small=false;
   if(beat<1) txt='준비'; else if(beat<LEAD+0.6) txt='출발!';
-  if(R.dead){ txt=bar<7?'다음 마디에서 다시 출발':'도착 지점에서 다시 출발'; small=true; }
+  if(R.dead&&!R.finished){ txt='다음 마디에서 다시 출발'; small=true; }
   if(cue.textContent!==txt) cue.textContent=txt; cue.classList.toggle('small',small);
 }
 function countHeard(beat){
@@ -735,7 +766,6 @@ function frame(ts){
       physics(ts/1000); collectCoins();
       R.parts.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt; if(p.g) p.vy+=300*dt;}); R.parts=R.parts.filter(p=>p.life>0);
       R.pops.forEach(p=>p.t+=dt); R.pops=R.pops.filter(p=>p.t<0.9);
-      if(!R.finished&&R.x>=END_BEAT*R.ppb){ R.finished=true; setTimeout(finishRace,300); }
     }
     render(); updateHud();
   }
@@ -744,13 +774,16 @@ function frame(ts){
 
 function finishRace(){
   if(!R) return; stopSeq();
-  const comp=R.totalNotes?Math.round(R.played.size/R.totalNotes*100):100;
-  const stars=1+(comp>=90?1:0)+((R.crashes===0&&comp===100)?1:0);
+  const heardFirstLap=[...R.played].filter(b=>b<LEAD+MEL_BEATS).length;
+  const comp=R.totalNotes?Math.min(100,Math.round(heardFirstLap/R.totalNotes*100)):100;
+  const barFinal=Math.floor((R.x/R.ppb-LEAD)/4), laps=Math.max(0,Math.floor(barFinal/8));
+  const stars=1+(comp>=90?1:0)+(laps>=1?1:0);
   const starSvg=(on,size)=>'<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.8-4.9 4.6 1.3 6.5L12 17.2l-5.9 3.2 1.3-6.5L2.5 9.3l6.6-.8z" '+(on?'fill="#FFC93C"':'fill="none" stroke="#5A5F99" stroke-width="1.8" stroke-linejoin="round"')+'></path></svg>';
   $('stars').innerHTML=starSvg(stars>=1,40)+starSvg(stars>=2,52)+starSvg(stars>=3,40);
   $('stars').setAttribute('aria-label','별 '+stars+'개');
-  $('starhint').textContent=stars===3?'별 3개, 완벽해요':(stars===2?'별 2개 · 뒤집힘 없이 100%면 3개':'별 1개 · 완성도 90%면 2개');
-  $('rinfo').textContent=song.name+' · '+R.cfg.name+' · '+R.bpm+' BPM · 점수 '+R.score.toLocaleString('ko-KR');
+  $('starhint').textContent=stars===3?'별 3개, 대단해요!':(stars===2?'별 2개 · 바퀴를 한 번 넘기면 3개':'별 1개 · 완성도 90%면 2개');
+  $('rtitle').textContent='게임 오버!';
+  $('rinfo').textContent=song.name+' · '+R.cfg.name+' · '+R.bpm+' BPM · '+(laps>0?(laps+1)+'바퀴째 · ':'')+'점수 '+R.score.toLocaleString('ko-KR');
   $('comp').textContent=comp+'%';
   const strip=$('barstrip'); strip.innerHTML='';
   for(let j=0;j<8;j++){ const d=document.createElement('div'); if(R.muted.has(j)){ d.className='mute'; d.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FF7A6B" stroke-width="2.4" stroke-linecap="round" role="img" aria-label="'+(j+1)+'마디 음 소거"><path d="M4 9v6h4l5 4V5L8 9z"></path><path d="M17 9l4 6M21 9l-4 6"></path></svg>'; } else d.setAttribute('aria-label',(j+1)+'마디 완성'); strip.appendChild(d); }

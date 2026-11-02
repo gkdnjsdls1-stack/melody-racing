@@ -48,32 +48,33 @@ function newRace(mel, bpm, diffIdx) {
   const spb = 60 / bpm;
   const vx = 230 * Math.min(1.5, Math.max(1, 1 + (bpm - 80) / 160));
   const ppb = vx * spb;
-  const T = buildTerrain(mel, ppb, 22, 2, LEAD, END_BEAT - LEAD - MEL_BEATS + 3);
+  const T = buildTerrain(mel, ppb, 22, LOOPS, LEAD, 5);
   const cfg = DIFFS[diffIdx];
   return {
     bpm, spb, vx, ppb, T, mel: mel.slice(),
     g: 0.72 * vx * vx / ppb, gG: 15 * vx * vx / ppb, cfg, torque: cfg.torque * (0.8 + bpm / 400), tgt: 0,
     accel: vx / 0.6, coastDecel: vx / 1, brakeDecel: vx / 0.3, revVx: vx * 0.6,
     simT: 0, x: 0, y: T.at(0), vy: 0, spd: 0, ang: 0, angV: 0, onGround: true, air: 0,
-    dead: false, respawnX: 0, deadX: 0, deadY: 0, deadVy: 0, deadAng: 0, deadAngV: 0, deadT: 0,
+    dead: false, lives: 3, respawnX: 0, deadX: 0, deadY: 0, deadVy: 0, deadAng: 0, deadAngV: 0, deadT: 0,
     muted: new Set(), played: new Set(), stepIdx: 0,
     score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, crashes: 0, pops: [], parts: [], puff: 0, wheel: 0,
     gas: false, brake: false, paused: false, finished: false
   };
 }
+function finishRace(){} // index.html 쪽 결과 화면 로직. 시뮬레이션은 R.finished만 보면 됨
 
 // 플레이어 정책: 가속은 땅에서 전진, 공중에서는 가속/브레이크 둘 다 회전만 맡는다(Hill Climb Racing 방식)
 function policyGasAlways(R) { return { gas: true, brake: false }; } // 그냥 가속 꾹
 function policyGasThenBrakeInAir(R) { return R.onGround ? { gas: true, brake: false } : { gas: false, brake: true }; } // 땅=가속, 공중=브레이크로 조준
 function policyGasThenReleaseInAir(R) { return R.onGround ? { gas: true, brake: false } : { gas: false, brake: false }; } // 땅=가속, 공중=손뗌(어시스트에만 의존)
 
-// 한 판 전체 시뮬레이션. 실제 게임처럼 뒤집혀도 멈추지 않고 다음 마디에서 재출발.
-// 이제 속도가 조작에 달려 있어서 완주 시간이 고정이 아니므로, 넉넉한 실시간 상한으로 멈춘다.
+// 한 판 전체 시뮬레이션. 목숨 3개 — 다 쓰면 그 자리에서 끝(실제 게임과 동일, crash()가 R.finished를 세팅).
+// 아주 안 죽는 정책 대비용으로 넉넉한 실시간 상한을 둔다.
 function runTrial(mel, bpm, diffIdx, policy) {
   R = newRace(mel, bpm, diffIdx);
-  const dt = 0.004, finishX = END_BEAT * R.ppb, maxTime = 40;
-  const tally = { flip: 0, wall: 0, pit: 0, finished: false };
-  while (R.simT < maxTime && R.x < finishX) {
+  const dt = 0.004, maxTime = 90;
+  const tally = { flip: 0, wall: 0, pit: 0 };
+  while (R.simT < maxTime && !R.finished) {
     const act = policy(R);
     R.gas = act.gas; R.brake = act.brake;
     const prevCrashes = R.crashes;
@@ -85,25 +86,26 @@ function runTrial(mel, bpm, diffIdx, policy) {
       else if (reason === '구덩이에 빠졌어요') tally.pit++;
     }
   }
-  tally.finished = R.x >= finishX;
+  const bar = Math.floor((R.x / R.ppb - LEAD) / 4);
+  tally.laps = Math.max(0, Math.floor(bar / 8));
+  tally.timedOut = !R.finished;
+  tally.timeSec = R.simT;
   return tally;
 }
 
 function runSet(diffIdx, policyName, policy, trials) {
-  let flipRuns = 0, totalFlip = 0, totalWall = 0, totalPit = 0, unfinished = 0;
+  let totalFlip = 0, totalWall = 0, totalPit = 0, totalLaps = 0, totalTime = 0, timedOut = 0;
   for (let i = 0; i < trials; i++) {
     const t = runTrial(randomMap(), randomBpm(), diffIdx, policy);
-    if (t.flip > 0) flipRuns++;
-    if (!t.finished) unfinished++;
-    totalFlip += t.flip; totalWall += t.wall; totalPit += t.pit;
+    totalFlip += t.flip; totalWall += t.wall; totalPit += t.pit; totalLaps += t.laps; totalTime += t.timeSec;
+    if (t.timedOut) timedOut++;
   }
   return {
     난이도: DIFFS[diffIdx].name, 플레이어: policyName, 판수: trials,
-    '평균 뒤집힘/판': +(totalFlip / trials).toFixed(2),
-    '뒤집힘 있던 판 비율': Math.round(flipRuns / trials * 100) + '%',
-    '평균 벽충돌/판': +(totalWall / trials).toFixed(2),
-    '평균 구덩이/판': +(totalPit / trials).toFixed(2),
-    '시간초과(40s) 미완주': unfinished
+    '평균 생존 바퀴': +(totalLaps / trials).toFixed(2),
+    '평균 생존 시간(초)': +(totalTime / trials).toFixed(1),
+    '뒤집힘/벽/구덩이 합': totalFlip + '/' + totalWall + '/' + totalPit,
+    '90s 안 죽음': timedOut
   };
 }
 
