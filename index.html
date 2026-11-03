@@ -280,7 +280,7 @@ const PRESETS=[
 ];
 // difficulty: kick = nose-up spin off a ramp, assist = how hard the car levels itself when no pedal is held, flip = crash angle
 const DIFFS=[
-  {name:'쉬움',kick:-0.5,assist:4,damp:6,torque:1.7,flip:65,pf:16,gd:32},
+  {name:'쉬움',kick:-0.5,assist:2.5,damp:6,torque:1.7,flip:65,pf:16,gd:32},
   {name:'보통',kick:-0.8,assist:1.5,damp:5,torque:2.2,flip:52,pf:13,gd:28},
   {name:'어려움',kick:-1.1,assist:0,damp:3,torque:2.8,flip:42,pf:11,gd:24}
 ];
@@ -537,7 +537,7 @@ function startRace(){
      accel:vx/0.6, coastDecel:vx/1, brakeDecel:vx/0.3, revVx:vx*0.6,
      simT:null,x:0,y:T.at(0),vy:0,spd:0,ang:0,angV:0,onGround:true,air:0,airSpin:0,inLoop:null,
      dead:false,lives:3,respawnX:0,deadX:0,deadY:0,deadVy:0,deadAng:0,deadAngV:0,deadT:0,
-     muted:new Set(),played:new Set(),stepIdx:0,totalNotes:song.mel.filter(v=>v>=0).length*2,
+     muted:new Set(),played:new Set(),stepIdx:0,totalNotes:song.mel.filter(v=>v>=0).length*2,firstLand:true,
      coins,score:0,combo:0,maxCombo:0,perfect:0,good:0,crashes:0,pops:[],parts:[],puff:0,wheel:0,
      camY:null,camY0:null,gas:false,brake:false,paused:false,finished:false,lastHud:''};
   $('hudname').textContent=song.name; $('pausesheet').hidden=true;
@@ -642,7 +642,11 @@ function land(gx){
   const sl=R.T.slope(R.x), sa=Math.atan(sl), deg=Math.abs(wrap(R.ang-sa))*180/Math.PI;
   const air=R.air, spin=R.airSpin||0;
   R.y=gx; R.vy=sl*R.spd; R.onGround=true; R.air=0; R.angV=0; R.jg=0; R.airSpin=0;
-  if(deg>R.cfg.flip/lapMult()){crash('뒤집혔어요');return;}
+  // 쉬움 난이도는 레이스 첫 착지에서만 뒤집히지 않음 - "가속만 누르다 바로 전멸"을 피하게 함
+  // (첫 점프대가 쉼표 트릭 구간과 겹치면 체공이 길어 배수로는 못 막아서 아예 면제)
+  const exemptFirstLand=R.firstLand&&R.cfg===DIFFS[0];
+  R.firstLand=false;
+  if(!exemptFirstLand&&deg>R.cfg.flip/lapMult()){crash('뒤집혔어요');return;}
   if(air<0.22) return;
   const spins=Math.floor(Math.abs(spin)/(2*Math.PI));
   if(spins>=1){ R.combo++; R.score+=spins*500; pop(spins*360+'° 성공!','#5EC8FF',true); sparks('#5EC8FF'); }
