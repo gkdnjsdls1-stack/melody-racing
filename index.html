@@ -289,6 +289,9 @@ const $=id=>document.getElementById(id);
 let song={name:'내 곡 1',mel:[0,2,3,3,4,5,5,-1,7,6,5,3,4,2,0,-1],bpm:120,drum:0,diff:0};
 try{const s=JSON.parse(localStorage.getItem('mr-song')||'null'); if(s&&Array.isArray(s.mel)&&s.mel.length===16){song=Object.assign(song,s);}}catch(e){}
 function save(){try{localStorage.setItem('mr-song',JSON.stringify(song));}catch(e){}}
+// Rider 참고: 난이도별 최고 생존 바퀴를 기억해뒀다가, 잘하는 사람은 2바퀴째부터 더 빨리 빡빡해지게 함(lapMult)
+function bestLaps(){try{return JSON.parse(localStorage.getItem('mr-best-laps')||'{}');}catch(e){return {};}}
+function saveBestLaps(diffIdx,laps){try{const b=bestLaps(); if(!b[diffIdx]||laps>b[diffIdx]){b[diffIdx]=laps; localStorage.setItem('mr-best-laps',JSON.stringify(b));} return b[diffIdx]||0;}catch(e){return laps;}}
 
 // ---------- stage scaling ----------
 const stage=$('stage'), fit=$('fit');
@@ -401,6 +404,11 @@ function insertLoops(T,ppb){
     if(baseY===null) continue;
     T.Y[k]=baseY;
     loops.push({x:(k+0.1)*ppb, r:LOOP_R, baseY});
+    // Rider 참고: 오래 버틴 사람에게는 같은 바퀴 안에 루프를 하나 더 준다(새 지형 종류 대신, 이미 검증된 "항상 안전한" 루프를 재사용)
+    if(Math.floor(bar/8)>=3){
+      const bar2=bar+4, k2=LEAD+bar2*4, baseY2=T.Y[k2-1];
+      if(k2+1<T.n&&baseY2!==null){ T.Y[k2]=baseY2; loops.push({x:(k2+0.1)*ppb, r:LOOP_R, baseY:baseY2}); }
+    }
   }
   T.loops=loops;
 }
@@ -532,15 +540,17 @@ function startRace(){
   insertLoops(T,ppb);
   const coins=[];
   for(let b=LEAD;b<LEAD+MEL_BEATS*LOOPS;b++){ const p=song.mel[(b-LEAD)%16]; if(p>=0){ const x=(b+0.3)*ppb; const gy=T.at(x); if(gy!==null) coins.push({x,y:gy-30,got:false}); } }
+  const diffIdx=song.diff||0, skillBoost=Math.min(4,Math.floor((bestLaps()[diffIdx]||0)/3));
   R={bpm,spb,vx,ppb,T,mel:song.mel.slice(),drum:song.drum,
-     g:0.72*vx*vx/ppb, gG:15*vx*vx/ppb, cfg:DIFFS[song.diff||0], torque:DIFFS[song.diff||0].torque*(0.8+bpm/400), tgt:0,
-     accel:vx/0.6, coastDecel:vx/1, brakeDecel:vx/0.3, revVx:vx*0.6,
+     g:0.72*vx*vx/ppb, gG:15*vx*vx/ppb, cfg:DIFFS[diffIdx], torque:DIFFS[diffIdx].torque*(0.8+bpm/400), tgt:0,
+     accel:vx/0.6, coastDecel:vx/1, brakeDecel:vx/0.3, revVx:vx*0.6, skillBoost,
      simT:null,x:0,y:T.at(0),vy:0,spd:0,ang:0,angV:0,onGround:true,air:0,airSpin:0,inLoop:null,
      dead:false,lives:3,respawnX:0,deadX:0,deadY:0,deadVy:0,deadAng:0,deadAngV:0,deadT:0,
      muted:new Set(),played:new Set(),stepIdx:0,totalNotes:song.mel.filter(v=>v>=0).length*2,firstLand:true,
      coins,score:0,combo:0,maxCombo:0,perfect:0,good:0,crashes:0,pops:[],parts:[],puff:0,wheel:0,
      camY:null,camY0:null,gas:false,brake:false,paused:false,finished:false,lastHud:''};
   $('hudname').textContent=song.name; $('pausesheet').hidden=true;
+  if(skillBoost>0) toast('이전 기록 반영: 2바퀴째부터 더 빨리 빡빡해져요');
   show('race');
   if(!rafOn){rafOn=true;requestAnimationFrame(frame);}
 }
@@ -566,6 +576,13 @@ const wrap=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return
 function lapMult(){
   const bar=Math.floor((R.x/R.ppb-LEAD)/4), lap=Math.max(0,Math.floor(bar/8));
   return 1+Math.min(0.6,0.08*lap);
+}
+// Rider 참고: 이 난이도의 과거 최고 생존 바퀴가 높을수록 2바퀴째부터 "착지 판정"만 더 깐깐해짐(R.skillBoost, startRace에서 계산)
+// 속도(lapMult)까지 같이 올리면 점프 체공시간이 짧아져 오히려 더 쉬워지는 역효과가 시뮬레이션에서 확인돼서, 판정에만 적용
+function flipLapMult(){
+  const bar=Math.floor((R.x/R.ppb-LEAD)/4), lap=Math.max(0,Math.floor(bar/8));
+  const eff=lap>=2?lap+(R.skillBoost||0):lap;
+  return 1+Math.min(0.6,0.08*eff);
 }
 
 function physics(now){
@@ -646,7 +663,7 @@ function land(gx){
   // (첫 점프대가 쉼표 트릭 구간과 겹치면 체공이 길어 배수로는 못 막아서 아예 면제)
   const exemptFirstLand=R.firstLand&&R.cfg===DIFFS[0];
   R.firstLand=false;
-  if(!exemptFirstLand&&deg>R.cfg.flip/lapMult()){crash('뒤집혔어요');return;}
+  if(!exemptFirstLand&&deg>R.cfg.flip/flipLapMult()){crash('뒤집혔어요');return;}
   if(air<0.22) return;
   const spins=Math.floor(Math.abs(spin)/(2*Math.PI));
   if(spins>=1){ R.combo++; R.score+=spins*500; pop(spins*360+'° 성공!','#5EC8FF',true); sparks('#5EC8FF'); }
@@ -743,6 +760,21 @@ function render(){
     c.strokeStyle='#FFC93C'; c.lineWidth=5; c.stroke();
     c.save(); c.setLineDash([10,8]); c.strokeStyle='#353A72'; c.lineWidth=2; c.beginPath(); sg.forEach((p,i)=>i?c.lineTo(p[0],p[1]+16):c.moveTo(p[0],p[1]+16)); c.stroke(); c.restore();
   });
+  // 트릭 점프대 표지(Rider의 부스터 발판 참고): 쉼표가 트릭 구간에 걸려 체공이 긴 점프대는 미리 하늘색 회전 아이콘으로 알려줌
+  { const k0=Math.max(0,Math.floor((camX-80)/R.ppb)), k1=Math.ceil((camX+W+80)/R.ppb);
+    for(let k=k0;k<=k1;k++){
+      if(!T.TAN[k]||!isTrickSpot(k*R.ppb)) continue;
+      const lipX=(k+0.8)*R.ppb, gy=T.at(lipX); if(gy===null) continue;
+      const sx=lipX-camX, sy=gy-camY-18;
+      c.save();
+      c.fillStyle='rgba(94,200,255,0.25)'; c.beginPath(); c.arc(sx,sy,14,0,7); c.fill();
+      c.strokeStyle='#5EC8FF'; c.lineWidth=3; c.lineCap='round';
+      c.beginPath(); c.arc(sx,sy,8,0.6,5.6); c.stroke();
+      const ax=sx+8*Math.cos(0.6), ay=sy+8*Math.sin(0.6);
+      c.beginPath(); c.moveTo(ax,ay); c.lineTo(ax+5,ay-2); c.lineTo(ax-2,ay+5); c.closePath(); c.fillStyle='#5EC8FF'; c.fill();
+      c.restore();
+    }
+  }
   // 루프 (ponytail: 차보다 항상 위 레이어로 그림 - 차가 루프 뒤쪽을 지날 때 가려지는 건 생략)
   if(T.loops) T.loops.forEach(lp=>{
     const sx=lp.x-camX; if(sx<-120||sx>W+120) return;
@@ -828,6 +860,7 @@ function finishRace(){
   const comp=R.totalNotes?Math.min(100,Math.round(heardFirstLap/R.totalNotes*100)):100;
   const barFinal=Math.floor((R.x/R.ppb-LEAD)/4), laps=Math.max(0,Math.floor(barFinal/8));
   const stars=1+(comp>=90?1:0)+(laps>=1?1:0);
+  saveBestLaps(song.diff||0,laps);
   const starSvg=(on,size)=>'<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.8-4.9 4.6 1.3 6.5L12 17.2l-5.9 3.2 1.3-6.5L2.5 9.3l6.6-.8z" '+(on?'fill="#FFC93C"':'fill="none" stroke="#5A5F99" stroke-width="1.8" stroke-linejoin="round"')+'></path></svg>';
   $('stars').innerHTML=starSvg(stars>=1,40)+starSvg(stars>=2,52)+starSvg(stars>=3,40);
   $('stars').setAttribute('aria-label','별 '+stars+'개');
