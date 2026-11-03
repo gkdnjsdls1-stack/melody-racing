@@ -781,7 +781,7 @@ function render(){
 function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
 
 function updateHud(){
-  const beat=R.x/R.ppb, bar=Math.floor((beat-LEAD)/4), lap=Math.max(0,Math.floor(bar/8)), barInLap=((bar%8)+8)%8;
+  const beat=R.x/R.ppb, bar=Math.max(0,Math.floor((beat-LEAD)/4)), lap=Math.floor(bar/8), barInLap=bar%8;
   const segs=$('segs').children;
   for(let j=0;j<8;j++){ const cls=(lap===0&&R.muted.has(j))?'mute':(j<barInLap?'done':(j===barInLap?'now':'')); if(segs[j].className!==cls) segs[j].className=cls; }
   $('hudbar').textContent=(lap>0?'바퀴 '+(lap+1)+' · ':'')+'마디 '+(barInLap+1)+' / 8';
